@@ -1,0 +1,83 @@
+---
+- name: STIG Compliance Automation
+  hosts: all
+  become: yes
+  vars:
+    max_password_age: 60
+    min_password_age: 7
+    lockout_attempts: 5
+    log_retention_days: 30
+    ntp_servers:
+      - time1.example.com
+      - time2.example.com
+
+  tasks:
+    - name: Ensure password maximum age is set
+      lineinfile:
+        path: /etc/login.defs
+        regexp: '^PASS_MAX_DAYS'
+        line: "PASS_MAX_DAYS {{ max_password_age }}"
+        state: present
+
+    - name: Ensure password minimum age is set
+      lineinfile:
+        path: /etc/login.defs
+        regexp: '^PASS_MIN_DAYS'
+        line: "PASS_MIN_DAYS {{ min_password_age }}"
+        state: present
+
+    - name: Configure account lockout for failed login attempts
+      lineinfile:
+        path: /etc/security/faillock.conf
+        regexp: '^deny='
+        line: "deny={{ lockout_attempts }}"
+        state: present
+
+    - name: Set system-wide umask for new files
+      lineinfile:
+        path: /etc/profile
+        regexp: '^umask'
+        line: "umask 027"
+        state: present
+
+    - name: Ensure log retention is set to 30 days
+      replace:
+        path: /etc/logrotate.conf
+        regexp: '^\s*rotate\s+\d+'
+        replace: "rotate {{ log_retention_days }}"
+
+    - name: Ensure NTP is configured for time synchronization
+      blockinfile:
+        path: /etc/chrony/chrony.conf
+        block: |
+          server {{ item }} iburst
+        create: yes
+      loop: "{{ ntp_servers }}"
+
+    - name: Enable and start NTP service
+      service:
+        name: chronyd
+        state: started
+        enabled: yes
+
+    - name: Disable root SSH login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: "PermitRootLogin no"
+        state: present
+      notify: restart sshd
+
+    - name: Set SSH timeout interval
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^ClientAliveInterval'
+        line: "ClientAliveInterval 300"
+        state: present
+      notify: restart sshd
+
+  handlers:
+    - name: restart sshd
+      service:
+        name: sshd
+        state: restarted
