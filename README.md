@@ -14,4 +14,3 @@ Each folder corresponds to a specific blog article and contains all related reso
 
 ---
 
-## 📂 Repository Structure
