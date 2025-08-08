@@ -1,5 +1,5 @@
-# centlinux
-Linux System Administration, DevOps and Ansible Configurations
+# ![Centlinux Logo](centlinux-white-bg-250.png)
+Linux System Administration, DevOps, Docker, Kubernetes, AWS and Ansible Configurations
 
 This repository contains code examples, configuration files, and scripts referenced in my blog [CentLinux](https://centlinux.com) posts.  
 Each folder corresponds to a specific blog article and contains all related resources.
