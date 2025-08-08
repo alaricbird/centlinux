@@ -1,0 +1,79 @@
+---
+- name: Install Jenkins and Setup CI/CD on Ubuntu
+  hosts: jenkins_servers
+  become: true
+
+  vars:
+    jenkins_repo_url: https://pkg.jenkins.io/debian-stable
+    github_repo_url: https://github.com/example/sample-app.git
+    jenkins_admin_user: admin
+    jenkins_admin_password: admin123  # For demonstration; use vault/encryption in production
+
+  tasks:
+
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+
+    - name: Install Java (Jenkins requirement)
+      apt:
+        name: openjdk-11-jdk
+        state: present
+
+    - name: Add Jenkins APT key
+      apt_key:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io.key
+        state: present
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: "deb {{ jenkins_repo_url }} binary/"
+        state: present
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: latest
+        update_cache: yes
+
+    - name: Start and enable Jenkins service
+      systemd:
+        name: jenkins
+        enabled: true
+        state: started
+
+    - name: Install Git
+      apt:
+        name: git
+        state: present
+
+    - name: Install Jenkins CLI dependencies
+      apt:
+        name: [curl, unzip]
+        state: present
+
+    - name: Wait for Jenkins to be fully up (port 8080)
+      wait_for:
+        port: 8080
+        timeout: 120
+
+    - name: Get initial Jenkins admin password
+      slurp:
+        src: /var/lib/jenkins/secrets/initialAdminPassword
+      register: admin_password_file
+
+    - name: Show initial Jenkins password
+      debug:
+        msg: "{{ admin_password_file.content | b64decode }}"
+
+    - name: (Optional) Install Jenkins plugins via CLI or API
+      debug:
+        msg: "At this point, Jenkins is running. You can install plugins and set up jobs manually or via Jenkins Job DSL or API."
+
+    - name: Display next step instructions
+      debug:
+        msg: |
+          Access Jenkins at: http://<your_server_ip>:8080
+          Use the above password to unlock it.
+          Recommended plugins: Git, Pipeline, GitHub Integration
+          Create a pipeline job pointing to: {{ github_repo_url }}
