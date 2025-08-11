@@ -1,0 +1,58 @@
+version: "3.9"
+
+networks:
+  openwebui_net:
+    driver: bridge
+
+services:
+  openwebui:
+    image: ghcr.io/openwebui/openwebui:latest
+    container_name: openwebui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - ADMIN_USER=admin
+      - ADMIN_PASS=strongpassword
+      - OPENAI_API_KEY=sk-xxxxxxx   # Optional for OpenAI integration
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]    # Remove this if no GPU
+    networks:
+      - openwebui_net
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    depends_on:
+      - openwebui
+    networks:
+      - openwebui_net
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    entrypoint: /bin/sh -c
+    command: >
+      "trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot;
+        sleep 12h & wait $${!};
+      done"
+    networks:
+      - openwebui_net
