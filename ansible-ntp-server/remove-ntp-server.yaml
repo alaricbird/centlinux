@@ -1,0 +1,13 @@
+---
+- hosts: ntpservers
+  become: yes
+  tasks:
+    - name: Remove NTP
+      apt: name={{ item }} state=absent update_cache=yes
+      loop: [ 'ntp', 'ntpdate' ]
+    
+    - name: "UFW - Deny NTP port 123"
+      ufw:
+        rule: deny
+        port: "123"
+        proto: udp
