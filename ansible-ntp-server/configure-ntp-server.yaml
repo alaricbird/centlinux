@@ -1,0 +1,16 @@
+---
+- hosts: ntpservers
+  become: yes
+  tasks:
+    - name: Install NTP
+      apt: name={{ item }} state=latest update_cache=yes
+      loop: [ 'ntp', 'ntpdate' ]
+    
+    - name: Make sure NTP is started up
+      service: name=ntp state=started enabled=yes
+    
+    - name: "UFW - Allow NTP port 123"
+      ufw:
+        rule: allow
+        port: "123"
+        proto: udp
