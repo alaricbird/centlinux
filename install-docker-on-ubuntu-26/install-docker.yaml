@@ -1,0 +1,214 @@
+---
+- name: Install Docker on Ubuntu 26.04
+  hosts: docker-host.centlinux.com
+  become: true
+  gather_facts: yes
+  
+  vars:
+    # Docker repository configuration
+    docker_repo_uri: "https://download.docker.com/linux/ubuntu"
+    docker_gpg_url: "https://download.docker.com/linux/ubuntu/gpg"
+    docker_gpg_key_path: "/etc/apt/keyrings/docker.asc"
+    docker_repo_file: "/etc/apt/sources.list.d/docker.sources"
+    docker_component: "stable"
+    
+    # Docker packages to install
+    docker_packages:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    
+    # Docker daemon configuration
+    docker_log_max_size: "10m"
+    docker_log_max_files: 3
+    docker_storage_driver: "overlay2"
+    
+    # System configuration
+    apt_cache_valid_time: 3600
+    reboot_timeout: 300
+    
+  tasks:
+    - name: Display system information
+      debug:
+        msg:
+          - "Distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Release Codename: {{ ansible_distribution_release }}"
+          - "Architecture: {{ ansible_architecture }}"
+    
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: "{{ apt_cache_valid_time }}"
+      changed_when: false
+    
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        force_apt_get: yes
+      register: upgrade_result
+    
+    - name: Reboot if kernel was upgraded
+      reboot:
+        reboot_timeout: "{{ reboot_timeout }}"
+        pre_reboot_delay: 30
+        post_reboot_delay: 30
+      when: upgrade_result is changed and
+            upgrade_result.stdout is search("linux-image")
+    
+    - name: Install prerequisite packages
+      apt:
+        name:
+          - ssh
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        force_apt_get: yes
+    
+    - name: Ensure SSH service is running and enabled
+      systemd:
+        name: ssh
+        state: started
+        enabled: yes
+    
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Download Docker GPG key
+      get_url:
+        url: "{{ docker_gpg_url }}"
+        dest: "{{ docker_gpg_key_path }}"
+        mode: '0644'
+        force: yes
+        timeout: 30
+      register: gpg_download
+    
+    - name: Set permissions on Docker GPG key
+      file:
+        path: "{{ docker_gpg_key_path }}"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    - name: Configure Docker repository (DEB822 format)
+      copy:
+        dest: "{{ docker_repo_file }}"
+        content: |
+          Types: deb
+          URIs: {{ docker_repo_uri }}
+          Suites: {{ ansible_distribution_release }}
+          Components: {{ docker_component }}
+          Architectures: {{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+          Signed-By: {{ docker_gpg_key_path }}
+        mode: '0644'
+        owner: root
+        group: root
+      register: docker_repo
+    
+    - name: Update apt cache with Docker repository
+      apt:
+        update_cache: yes
+        cache_valid_time: 0
+      when: docker_repo.changed
+    
+    - name: Install Docker packages
+      apt:
+        name: "{{ docker_packages }}"
+        state: present
+        force_apt_get: yes
+      register: docker_install
+    
+    - name: Ensure Docker service is running and enabled
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      register: docker_service
+    
+    - name: Wait for Docker daemon to be ready
+      command: docker version
+      register: docker_version_check
+      retries: 5
+      delay: 5
+      until: docker_version_check.rc == 0
+      changed_when: false
+    
+    - name: Display Docker version
+      debug:
+        msg: "{{ docker_version_check.stdout_lines }}"
+    
+    - name: Create docker group
+      group:
+        name: docker
+        state: present
+        system: yes
+    
+    - name: Add current user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+      when: ansible_user != "root"
+      ignore_errors: yes
+    
+    - name: Create Docker daemon configuration directory
+      file:
+        path: /etc/docker
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Configure Docker daemon with best practices
+      copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "{{ docker_log_max_size }}",
+              "max-file": "{{ docker_log_max_files }}"
+            },
+            "storage-driver": "{{ docker_storage_driver }}",
+            "storage-opts": [
+              "overlay2.override_kernel_check=true"
+            ]
+          }
+        mode: '0644'
+        owner: root
+        group: root
+      register: docker_daemon_config
+    
+    - name: Restart Docker if configuration changed
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
+      when: docker_daemon_config.changed
+    
+    - name: Verify Docker installation with hello-world
+      command: docker run --rm hello-world
+      register: hello_world_test
+      failed_when: "'Hello from Docker!' not in hello_world_test.stdout"
+      changed_when: false
+    
+    - name: Display installation success message
+      debug:
+        msg:
+          - "✅ Docker installation completed successfully!"
+          - "📍 Docker version: {{ docker_version_check.stdout_lines[0] }}"
+          - "🚀 Docker service status: {{ docker_service.state }}"
+          - "🔑 User '{{ ansible_user }}' added to docker group"
+    
+    - name: Remove Docker test image
+      command: docker rmi hello-world
+      ignore_errors: yes
+      changed_when: false
