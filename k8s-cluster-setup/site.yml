@@ -1,0 +1,119 @@
+---
+- name: Setup Two-Node Kubernetes Cluster
+  hosts: kubernetes
+  become: yes
+  gather_facts: yes
+  any_errors_fatal: true
+  tags: always
+
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      changed_when: false
+      tags: always
+
+    - name: Ensure required system packages are installed
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+          - software-properties-common
+          - gnupg
+          - lsb-release
+          - net-tools
+          - ntp
+        state: present
+      tags: always
+
+    - name: Configure NTP for time synchronization
+      systemd:
+        name: ntp
+        state: started
+        enabled: yes
+      tags: always
+
+  roles:
+    - common
+
+- name: Configure Kubernetes Control Plane
+  hosts: control_plane
+  become: yes
+  any_errors_fatal: true
+  tags: control-plane
+
+  roles:
+    - control-plane
+
+- name: Configure Kubernetes Workers
+  hosts: workers
+  become: yes
+  any_errors_fatal: true
+  tags: worker
+
+  roles:
+    - worker
+
+- name: Post-Cluster Verification
+  hosts: control_plane
+  become: yes
+  tags: verify
+
+  tasks:
+    - name: Wait for cluster to stabilize
+      pause:
+        seconds: 30
+      tags: verify
+
+    - name: Get cluster nodes status
+      shell: |
+        kubectl get nodes -o wide
+      register: nodes_status
+      changed_when: false
+      tags: verify
+
+    - name: Display nodes status
+      debug:
+        msg: "{{ nodes_status.stdout_lines }}"
+      tags: verify
+
+    - name: Wait for all system pods to be ready
+      shell: |
+        kubectl get pods -n kube-system --no-headers | wc -l
+      register: pod_count
+      until: pod_count.stdout|int > 5
+      retries: 30
+      delay: 10
+      tags: verify
+
+    - name: Display system pods
+      shell: |
+        kubectl get pods -n kube-system -o wide
+      register: system_pods
+      changed_when: false
+      tags: verify
+
+    - name: Show system pods status
+      debug:
+        msg: "{{ system_pods.stdout_lines }}"
+      tags: verify
+
+    - name: Generate cluster summary
+      debug:
+        msg: |
+          ============================================
+          🚀 KUBERNETES CLUSTER SETUP COMPLETE 🚀
+          ============================================
+          Control Plane: {{ inventory_hostname }}
+          Worker Nodes: {{ groups['workers'] | join(', ') }}
+          CNI: Calico {{ kubernetes_cni_version }}
+          Pod Network CIDR: {{ pod_network_cidr }}
+          ============================================
+          To interact with cluster:
+          kubectl get nodes
+          kubectl get pods -n kube-system
+          ============================================
+      tags: verify

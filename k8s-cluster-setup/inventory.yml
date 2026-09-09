@@ -1,0 +1,18 @@
+---
+all:
+  children:
+    kubernetes:
+      children:
+        control_plane:
+          hosts:
+            controlplane.centlinux.com:
+              ansible_host: 192.168.59.107
+              ansible_user: ahmer
+        workers:
+          hosts:
+            worker01.centlinux.com:
+              ansible_host: 192.168.59.108
+              ansible_user: ahmer
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
