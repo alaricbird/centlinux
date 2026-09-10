@@ -1,0 +1,31 @@
+---
+# Kubernetes Version
+kubernetes_version: "1.37"
+kubernetes_cni_version: "v3.27.0"
+
+# Network Configuration
+pod_network_cidr: "10.244.0.0/16"
+service_cidr: "10.96.0.0/12"
+
+# Container Runtime
+containerd_config_path: "/etc/containerd/config.toml"
+
+# OS Settings
+swapoff_required: true
+kernel_modules:
+  - overlay
+  - br_netfilter
+
+sysctl_parameters:
+  net.bridge.bridge-nf-call-iptables: 1
+  net.bridge.bridge-nf-call-ip6tables: 1
+  net.ipv4.ip_forward: 1
+
+# Kubernetes packages to install
+kubernetes_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
+
+# API Server endpoint for control plane
+apiserver_advertise_address: "{{ hostvars[inventory_hostname].ansible_default_ipv4.address }}"
