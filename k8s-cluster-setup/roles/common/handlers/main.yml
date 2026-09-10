@@ -1,0 +1,17 @@
+---
+- name: Restart containerd
+  systemd:
+    name: containerd
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart kubelet
+  systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: yes
+
+- name: Reboot node
+  reboot:
+    reboot_timeout: 300
+    msg: "Ansible reboot required for kernel modules"

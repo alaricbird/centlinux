@@ -1,0 +1,40 @@
+---
+- name: Wait for control plane to be ready
+  pause:
+    seconds: 30
+  tags: worker
+
+- name: Get join command from control plane
+  fetch:
+    src: /tmp/join-command.txt
+    dest: /tmp/join-command.txt
+    flat: yes
+    fail_on_missing: yes
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  run_once: true
+  tags: worker
+
+- name: Read join command
+  slurp:
+    src: /tmp/join-command.txt
+  register: join_command_content
+  tags: worker
+
+- name: Decode join command
+  set_fact:
+    join_command: "{{ join_command_content.content | b64decode | trim }}"
+  tags: worker
+
+- name: Join Kubernetes cluster
+  shell: |
+    {{ join_command }}
+  args:
+    creates: /etc/kubernetes/kubelet.conf
+  register: join_result
+  tags: worker
+
+- name: Display join result
+  debug:
+    msg: "Worker joined successfully: {{ join_result.stdout }}"
+  when: join_result.stdout is defined
+  tags: worker
