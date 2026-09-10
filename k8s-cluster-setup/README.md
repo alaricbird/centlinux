@@ -27,7 +27,7 @@ ssh ubuntu@192.168.59.107
 kubectl get nodes -o wide
 kubectl get pods -n kube-system
 
-Advanced Features Added
+# Advanced Features Added
 Feature	Benefit
 Idempotent Tasks:	Run playbook multiple times without breaking cluster
 Error Handling:	any_errors_fatal: true stops on critical failures
@@ -38,9 +38,7 @@ Health Checks:	Verifies cluster is operational post-setup
 Kernel Modules:	Persisted across reboots
 Package Holds:	Prevents accidental version upgrades
 Structured Logging:	YAML output with task timings
-
-Troubleshooting:
-If Worker Fails to Join
+Troubleshooting: If Worker Fails to Join
 bash
 # Regenerate token on control plane
 ansible-playbook -i inventory.yml site.yml --tags control-plane -e "regenerate_token=true"
