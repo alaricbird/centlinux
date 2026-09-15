@@ -1,0 +1,51 @@
+---
+# User configuration
+admin_user: deploy
+admin_groups: sudo
+
+# SSH configuration
+ssh_port: 22
+ssh_permit_root_login: "no"
+ssh_password_auth: "no"
+ssh_pubkey_auth: "yes"
+ssh_challenge_response: "no"
+ssh_x11_forwarding: "no"
+ssh_max_auth_tries: 3
+ssh_client_alive_interval: 300
+ssh_client_alive_count_max: 2
+
+# Firewall
+ufw_allowed_ports:
+  - { port: "22", proto: "tcp", comment: "SSH" }
+
+# Fail2ban
+fail2ban_bantime: 3600
+fail2ban_findtime: 600
+fail2ban_maxretry: 5
+fail2ban_sshd_maxretry: 3
+
+# Swap
+swap_file_path: /swapfile
+swap_file_size_mb: 2048
+
+# Timezone
+system_timezone: Asia/Karachi
+
+# Essential packages
+essential_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - net-tools
+  - ufw
+  - fail2ban
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  - unattended-upgrades
+  - rsyslog
+  - logwatch
