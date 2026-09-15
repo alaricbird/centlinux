@@ -1,0 +1,275 @@
+---
+- name: Ubuntu Server Initial Setup and Hardening
+  hosts: ubuntu_servers
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - vars/main.yml
+
+  handlers:
+    - name: Restart SSH
+      ansible.builtin.systemd:
+        name: ssh
+        state: restarted
+
+    - name: Restart fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: Reload sysctl
+      ansible.builtin.command: sysctl --system
+      changed_when: true
+
+    - name: Restart rsyslog
+      ansible.builtin.systemd:
+        name: rsyslog
+        state: restarted
+
+  tasks:
+    # ---------------------------------------------------------------
+    # 1. Update and Upgrade the System
+    # ---------------------------------------------------------------
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Upgrade all installed packages
+      ansible.builtin.apt:
+        upgrade: safe
+        autoremove: true
+        autoclean: true
+
+    # ---------------------------------------------------------------
+    # 2. Create Non-Root User with Sudo Privileges
+    # ---------------------------------------------------------------
+    - name: Ensure admin user exists
+      ansible.builtin.user:
+        name: "{{ admin_user }}"
+        groups: "{{ admin_groups }}"
+        append: true
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Ensure .ssh directory exists for admin user
+      ansible.builtin.file:
+        path: "/home/{{ admin_user }}/.ssh"
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0700"
+
+    # ---------------------------------------------------------------
+    # 3. SSH Key-Based Authentication
+    # ---------------------------------------------------------------
+    - name: Deploy authorized_keys for admin user
+      ansible.posix.authorized_key:
+        user: "{{ admin_user }}"
+        key: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
+        state: present
+        exclusive: false
+
+    # ---------------------------------------------------------------
+    # 4. Harden SSH Configuration
+    # ---------------------------------------------------------------
+    - name: Configure SSH daemon hardening
+      ansible.builtin.template:
+        src: sshd_config.j2
+        dest: /etc/ssh/sshd_config
+        owner: root
+        group: root
+        mode: "0644"
+        validate: "/usr/sbin/sshd -t -f %s"
+      notify: Restart SSH
+
+    # ---------------------------------------------------------------
+    # 5. Configure UFW Firewall
+    # ---------------------------------------------------------------
+    - name: Set UFW default deny incoming
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW default allow outgoing
+      community.general.ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Allow configured ports through UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+        comment: "{{ item.comment }}"
+      loop: "{{ ufw_allowed_ports }}"
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+
+    # ---------------------------------------------------------------
+    # 6. Automatic Security Updates
+    # ---------------------------------------------------------------
+    - name: Configure unattended-upgrades auto-upgrades
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+
+    - name: Enable unattended-upgrades service
+      ansible.builtin.systemd:
+        name: unattended-upgrades
+        enabled: true
+        state: started
+
+    # ---------------------------------------------------------------
+    # 7. Time Synchronization
+    # ---------------------------------------------------------------
+    - name: Set system timezone
+      community.general.timezone:
+        name: "{{ system_timezone }}"
+
+    - name: Enable NTP synchronization
+      ansible.builtin.command: timedatectl set-ntp true
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 8. Install Essential Packages
+    # ---------------------------------------------------------------
+    - name: Install essential packages
+      ansible.builtin.apt:
+        name: "{{ essential_packages }}"
+        state: present
+        update_cache: true
+
+    # ---------------------------------------------------------------
+    # 9. Configure Fail2Ban
+    # ---------------------------------------------------------------
+    - name: Deploy fail2ban jail.local configuration
+      ansible.builtin.template:
+        src: jail.local.j2
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: "0644"
+        validate: "fail2ban-client -t -c %s"
+      notify: Restart fail2ban
+
+    - name: Ensure fail2ban service is enabled and running
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: started
+
+    # ---------------------------------------------------------------
+    # 10. Set Up Swap Space
+    # ---------------------------------------------------------------
+    - name: Check if swap file exists
+      ansible.builtin.stat:
+        path: "{{ swap_file_path }}"
+      register: swap_file
+
+    - name: Create swap file
+      ansible.builtin.command: "fallocate -l {{ swap_file_size_mb }}M {{ swap_file_path }}"
+      when: not swap_file.stat.exists
+      args:
+        creates: "{{ swap_file_path }}"
+
+    - name: Set swap file permissions
+      ansible.builtin.file:
+        path: "{{ swap_file_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      when: not swap_file.stat.exists
+
+    - name: Format swap file
+      ansible.builtin.command: "mkswap {{ swap_file_path }}"
+      when: not swap_file.stat.exists
+      changed_when: true
+
+    - name: Enable swap file
+      ansible.builtin.command: "swapon {{ swap_file_path }}"
+      when: not swap_file.stat.exists
+      changed_when: true
+
+    - name: Persist swap in /etc/fstab
+      ansible.posix.mount:
+        path: none
+        src: "{{ swap_file_path }}"
+        fstype: swap
+        opts: sw
+        state: present
+      when: not swap_file.stat.exists
+
+    # ---------------------------------------------------------------
+    # 11. Kernel Hardening via sysctl
+    # ---------------------------------------------------------------
+    - name: Deploy sysctl hardening configuration
+      ansible.builtin.template:
+        src: 99-hardening.conf.j2
+        dest: /etc/sysctl.d/99-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload sysctl
+
+    # ---------------------------------------------------------------
+    # 12. Logging and Monitoring
+    # ---------------------------------------------------------------
+    - name: Ensure rsyslog is enabled and running
+      ansible.builtin.systemd:
+        name: rsyslog
+        enabled: true
+        state: started
+
+    - name: Deploy logwatch daily cron job
+      ansible.builtin.copy:
+        dest: /etc/cron.daily/00logwatch
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          /usr/sbin/logwatch --output mail --mailto root --detail high
+
+    # ---------------------------------------------------------------
+    # 13. Basic Backup Strategy
+    # ---------------------------------------------------------------
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: /backups
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Deploy backup script
+      ansible.builtin.copy:
+        dest: /usr/local/bin/backup.sh
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          BACKUP_DIR="/backups"
+          DATE=$(date +%Y-%m-%d_%H-%M-%S)
+          tar -czf "$BACKUP_DIR/etc-backup-$DATE.tar.gz" /etc /home /var/www 2>/dev/null
+          find "$BACKUP_DIR" -type f -mtime +7 -delete
+
+    - name: Schedule daily backup via cron
+      ansible.builtin.cron:
+        name: "Daily system backup"
+        minute: "0"
+        hour: "2"
+        job: "/usr/local/bin/backup.sh"
+        user: root
+        state: present
